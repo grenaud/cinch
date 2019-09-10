@@ -9,6 +9,9 @@ import pathlib
 import pandas as pd
 #import seaborn as sns
 import sys
+import os, random
+import subprocess
+
 #!pip install -q tensorflow==2.0.0-beta1
 import tensorflow as tf
 import re
@@ -17,8 +20,133 @@ from tensorflow import keras
 from tensorflow.keras import layers
 
 
+def which(program):
+    sys.stderr.write("Detecting program: "+str(program)+"\n");
+    cjob = "type "+str(program);
 
- 
+    sp = subprocess.Popen(["/bin/bash", "-i", "-c", cjob],
+                                stdout=subprocess.PIPE, 
+                                stderr=subprocess.PIPE)
+    
+
+    out, err = sp.communicate();
+    errcode  = sp.returncode;
+    if(errcode != 0): #has finished but wrong code
+        sys.stderr.write("Cannot find program: "+str(program)+" please make sure it is installed\n");
+        sys.exit(1);
+    
+        #print("#"+str(str(out).find("aliased"))+"#");
+        #out=str(out);
+    if(out.find("aliased") != -1): #was aliased
+        return out[out.find(" to ")+5:-2];
+    else:
+        if(out.find(" is ") != -1):
+            return out[out.find(" is ")+4:];
+        else:
+            sys.stderr.write("Cannot seem to find program: "+str(program)+" please make sure it is installed\n");
+            sys.exit(1);
+            
+
+    
+
+    return out;
+
+def handle_job(cjob):
+
+    jobcreated=subprocess.Popen(cjob,shell=True,
+                                executable="/bin/bash",
+                                stdout=subprocess.PIPE, 
+                                stderr=subprocess.PIPE); 
+    jobcreated.wait()
+    #print str(cjob);
+
+    out, err = jobcreated.communicate()
+    errcode  = jobcreated.returncode;
+
+    if(err != ""): #has finished but has printed to stderr
+        print("Job failed "+cjob+" failed");
+        sys.exit(1);
+    else:
+        print("Job finished succesfully");
+
+    return out;
+
+
+
+sys.stderr.write("Detecting program: insize");
+
+pathofexec  = os.path.abspath(sys.argv[0]);
+pathofexecarray=pathofexec.split('/')[:-1];
+
+pathofinsize =  ("/".join(pathofexecarray))+"/lib/insertsize/src/insize";
+
+
+rcmd        = re.sub('\s+','',which("R"));
+
+print(rcmd);
+
+rscmd        = re.sub('\s+','',which("Rscript"));
+
+print(rscmd);
+#hmmcopycmd =  rcmd+"  CMD BATCH --vanilla --silent <(echo \"is.installed <- function(mypkg) is.element(mypkg, installed.packages()[,1]);  is.installed('HMMcopy');\") /dev/stdout";
+hmmcopycmd =  rscmd+" -e \"is.installed <- function(mypkg) is.element(mypkg, installed.packages()[,1]);  is.installed('HMMcopy');\" ";
+
+print(hmmcopycmd);
+outputrcmd = handle_job(hmmcopycmd);
+
+if( "[1] FALSE"  in outputrcmd ):
+    sys.stderr.write("\nERROR: cannot find package HMMcopy, please install it (see http://bioconductor.org/packages/release/bioc/html/HMMcopy.html)\n");
+    sys.exit(1);
+
+
+if ( not (  "[1] TRUE"  in outputrcmd )):
+    sys.stderr.write("\nERROR: not sure if we can find package HMMcopy, contact developers, this is an unknown case\n");
+    sys.exit(1);
+        
+
+    
+
+#sys.exit(1);
+
+
+if(not os.path.exists(pathofinsize)):
+    sys.stderr.write("\nERROR: The executable file "+pathofinsize+" does the exist, please type make in the main directory\n");
+    sys.exit(1);
+
+
+def which(program):
+    sys.stderr.write("Detecting program: "+str(program)+"\n");
+    cjob = "type "+str(program);
+
+    sp = subprocess.Popen(["/bin/bash", "-i", "-c", cjob],
+                                stdout=subprocess.PIPE, 
+                                stderr=subprocess.PIPE)
+    
+
+    out, err = sp.communicate();
+    errcode  = sp.returncode;
+    if(errcode != 0): #has finished but wrong code
+        sys.stderr.write("Cannot find program: "+str(program)+" please make sure it is installed\n");
+        sys.exit(1);
+    
+        #print("#"+str(str(out).find("aliased"))+"#");
+        #out=str(out);
+    if(out.find("aliased") != -1): #was aliased
+        return out[out.find(" to ")+5:-2];
+    else:
+        if(out.find(" is ") != -1):
+            return out[out.find(" is ")+4:];
+        else:
+            sys.stderr.write("Cannot seem to find program: "+str(program)+" please make sure it is installed\n");
+            sys.exit(1);
+            
+
+    
+
+    return out;
+
+
+
 #print(pathofconfig);
 parser = OptionParser(
 "\n\n"+
@@ -117,6 +245,8 @@ if(args[0] == "train"):
     
     
     if(not os.path.exists(logfile)):
+        #read file of file
+        
         #insert size
 
 

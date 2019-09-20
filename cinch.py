@@ -224,7 +224,7 @@ resultso = options.resultso;
 if(not resultso.endswith("/")):
     resultso = resultso+"/";
 
-
+    
 
 
 # train
@@ -233,6 +233,18 @@ if(args[0] == "train"):
 
     foffile=args[1];
 
+    foffilefd = open(foffile, "r");
+    bamfiles=[];
+    label   =[];
+
+    for linefd in foffilefd:
+        fields=linefd.split("\t");
+        if(len(fields)!=2):
+            sys.stderr.write("\nThe line "+linefd+" does not have 2 tab separated fields\n");
+            sys.exit(1);
+        bamfiles.append( fields[0] );
+        label.append(    fields[1] );#todo check if digit
+        
     foffilesub=re.sub('/','_',foffile);
     foffilesub=re.sub("\ ",'_',foffilesub);
     
@@ -244,7 +256,7 @@ if(args[0] == "train"):
     #stage 2: training+writing model
     
     
-    if(not os.path.exists(logfile)):
+    if(not os.path.exists(logfile)):#step 1
         #read file of file
         
         #insert size
@@ -252,24 +264,81 @@ if(args[0] == "train"):
 
         #CNV
         fileHandleLC = open ( ""+tfm+"/listcommands_1.txt", 'w' ) ;
-        #print commands here
-        
+        for bami in range(0,len(bamfiles)):
+            fileHandleLC.write(pathofinsize+" "+bamfiles[bami]+" |sort -n |uniq -c |gzip > "+options.resultso+"/stage1/"+str(bami)+".isize.gz");
         fileHandleLC.close();
         
         
         logfilefp = open(logfile, "w");
+        logfile.write("#-o:"+options.resultso+"\n");
+        logfile.write("#fof:"+foffile+"\n");
         logfile.write("#stage1\n");
         
+        print("Please run the commands manually either using:");
+        print("cat "+tfm+"/listcommands.txt | parallel -j "+str(options.threads));
+        print("on the use a batch/queueing system to launch:");
+        print("cat "+tfm+"/listcommands.txt | sbatch ...");
+        print("");
+        print("Once commands are done, rerun with:\n");
+        print("cinch.py   -o "+options.resultso+"  train "+foffile);
+        print("");
+
+        cmdtolaunch="cat "+tfm+"/listcommands.txt | parallel  -j "+str(options.threads);
+
 
         
     else:
-           
+        stage=1;
         logfilefp = open(logfile, "r");
 
-        for linelog in logfilefp:
-            print(linelog);
+        #for linelog in logfilefp:
+        linelog = logfilefp.readline();
+        if(linelog.startswith("#-o:")):
+            options.resultso = linelog[len("#-o:"):len(linelog)];                
+        else:
+            sys.stderr.write("\nThe line "+linelog+" in "+logfile+" should start with #-o: something went wrong, please delete the log file.\n");
+            sys.exit(1);
+
+        linelog = logfilefp.readline();
+        if(linelog.startswith("#fof:")):
+            if(foffile != linelog[len("#fof:"):len(linelog)]):
+                sys.stderr.write("\nThe line "+linelog+" in "+logfile+" should have #fof with the same as the ones provided as arguments: something went wrong, please delete the log file.\n");
+                sys.exit(1);
+                
+        else:
+            sys.stderr.write("\nThe line "+linelog+" in "+logfile+" should have #fof: something went wrong, please delete the log file.\n");
+            sys.exit(1);
+
+        linelog = logfilefp.readline();
+        if(linelog.startswith("#stage1:")):
+            stage=2;
+        else:
+            sys.stderr.write("\nThe line "+linelog+" in "+logfile+" should have with #stage1: something went wrong, please delete the log file.\n");
+            sys.exit(1);
 
         logfilefp.close();
+
+        if(stage==1):
+            sys.stderr.write("\nCannot identify stage in "+logfile+" should have with #stage1: something went wrong, please delete the log file.\n");
+            sys.exit(1);
+                    
+        if( stage == 2):
+            #parse isize
+            for bami in range(0:len(bamfiles)):
+                fileisize = options.resultso+"/stage1/"+str(bami)+".isize.gz";
+                if(not os.path.exists(fileisize)):
+                    sys.stderr.write("\nThe file "+fileisize+" does not exist, please run all commands.\n");
+                    sys.exit(1);
+                else:
+                    fileisizefd = open(fileisize, "r");
+
+                    for lineisfd in fileisizefd:
+                        fields=lineisfd.split("\t");
+                    #TODO, add ability to read gzipped
+                    
+            #if(linelog read 
+
+
  
 
         

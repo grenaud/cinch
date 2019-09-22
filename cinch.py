@@ -6,18 +6,18 @@ from optparse import OptionParser
 import pathlib
 
 #import matplotlib.pyplot as plt
-import pandas as pd
+
 #import seaborn as sns
 import sys
 import os, random
 import subprocess
 
 #!pip install -q tensorflow==2.0.0-beta1
-import tensorflow as tf
+#import pandas as pd
+#import tensorflow as tf
 import re
-
-from tensorflow import keras
-from tensorflow.keras import layers
+#from tensorflow import keras
+#from tensorflow.keras import layers
 
 
 def which(program):
@@ -73,45 +73,12 @@ def handle_job(cjob):
 
 
 
-sys.stderr.write("Detecting program: insize");
-
-pathofexec  = os.path.abspath(sys.argv[0]);
-pathofexecarray=pathofexec.split('/')[:-1];
-
-pathofinsize =  ("/".join(pathofexecarray))+"/lib/insertsize/src/insize";
-
-
-rcmd        = re.sub('\s+','',which("R"));
-
-print(rcmd);
-
-rscmd        = re.sub('\s+','',which("Rscript"));
-
-print(rscmd);
-#hmmcopycmd =  rcmd+"  CMD BATCH --vanilla --silent <(echo \"is.installed <- function(mypkg) is.element(mypkg, installed.packages()[,1]);  is.installed('HMMcopy');\") /dev/stdout";
-hmmcopycmd =  rscmd+" -e \"is.installed <- function(mypkg) is.element(mypkg, installed.packages()[,1]);  is.installed('HMMcopy');\" ";
-
-print(hmmcopycmd);
-outputrcmd = handle_job(hmmcopycmd);
-
-if( "[1] FALSE"  in outputrcmd ):
-    sys.stderr.write("\nERROR: cannot find package HMMcopy, please install it (see http://bioconductor.org/packages/release/bioc/html/HMMcopy.html)\n");
-    sys.exit(1);
-
-
-if ( not (  "[1] TRUE"  in outputrcmd )):
-    sys.stderr.write("\nERROR: not sure if we can find package HMMcopy, contact developers, this is an unknown case\n");
-    sys.exit(1);
         
 
     
 
 #sys.exit(1);
 
-
-if(not os.path.exists(pathofinsize)):
-    sys.stderr.write("\nERROR: The executable file "+pathofinsize+" does the exist, please type make in the main directory\n");
-    sys.exit(1);
 
 
 def which(program):
@@ -194,7 +161,7 @@ parser.add_option("-o","--outdir",         dest="resultso",     help="Output dir
 #parser.add_option("--hpc",                  dest="hpc",          help="Use high-performance computing (for queueing systems ex: SGE)",          action="store_true");
 #parser.add_option("--resume",               dest="resume",       help="Resume by providing the temp directory used",                              type="string");
 #parser.add_option("--nice",                 dest="nice",         help="Nice the jobs",                                                          action="store_true");
-#parser.add_option("-t"  , "--threads",      dest="threads",      help="Number of threads to use if the local machine is used",  default=1,   type="int");
+parser.add_option("-t"  , "--threads",      dest="threads",      help="Number of threads to use if the local machine is used",  default=1,   type="int");
 #
 #parser.add_option("--mismap",               dest="mismappingrate", help="Mismapping rate , default is "+str(mismappingrate)+"",            default=mismappingrate, type="float");
 #
@@ -213,13 +180,49 @@ parser.add_option("-o","--outdir",         dest="resultso",     help="Output dir
 (options,args) = parser.parse_args()
 
 if( len(args) < 2 ):
-    sys.stderr.write("\nplease use -h to see options.\n");
+    sys.stderr.write("\nneed a least 2 arguments, please use -h to see options.\n");
+    sys.exit(1);
+
+sys.stderr.write("Detecting program: insize");
+
+pathofexec      = os.path.abspath(sys.argv[0]);
+pathofexecarray = pathofexec.split('/')[:-1];
+
+pathofinsize =  ("/".join(pathofexecarray))+"/lib/insertsize/src/insize";
+
+
+if(not os.path.exists(pathofinsize)):
+    sys.stderr.write("\nERROR: The executable file "+pathofinsize+" does not exist, please type make in the main directory\n");
+    sys.exit(1);
+
+
+rcmd        = re.sub('\s+','',which("R"));
+
+print(rcmd);
+
+rscmd        = re.sub('\s+','',which("Rscript"));
+
+print(rscmd);
+#hmmcopycmd =  rcmd+"  CMD BATCH --vanilla --silent <(echo \"is.installed <- function(mypkg) is.element(mypkg, installed.packages()[,1]);  is.installed('HMMcopy');\") /dev/stdout";
+hmmcopycmd =  rscmd+" -e \"is.installed <- function(mypkg) is.element(mypkg, installed.packages()[,1]);  is.installed('HMMcopy');\" ";
+
+print(hmmcopycmd);
+outputrcmd = handle_job(hmmcopycmd);
+
+if( "[1] FALSE"  in outputrcmd ):
+    sys.stderr.write("\nERROR: cannot find package HMMcopy, please install it (see http://bioconductor.org/packages/release/bioc/html/HMMcopy.html)\n");
+    sys.exit(1);
+
+
+if ( not (  "[1] TRUE"  in outputrcmd )):
+    sys.stderr.write("\nERROR: not sure if we can find package HMMcopy, contact developers, this is an unknown case\n");
     sys.exit(1);
 
 if( options.resultso == None):
     sys.stderr.write("\nPlease specify the outdir\n");
     sys.exit(1);
 
+sys.stderr.write("\n\n\n");
 resultso = options.resultso;
 if(not resultso.endswith("/")):
     resultso = resultso+"/";
@@ -230,65 +233,92 @@ if(not resultso.endswith("/")):
 # train
 
 if(args[0] == "train"):
-
+    #####################################
+    #   stage 1: feature extraction     #
+    #####################################
     foffile=args[1];
 
     foffilefd = open(foffile, "r");
-    bamfiles=[];
-    label   =[];
-
+    bamfiles  = [];
+    label     = [];
+    
     for linefd in foffilefd:
-        fields=linefd.split("\t");
+        linefd = linefd.strip();
+        fields = linefd.split();
+
+        if(len(linefd)==0):
+            continue;
+
         if(len(fields)!=2):
-            sys.stderr.write("\nThe line "+linefd+" does not have 2 tab separated fields\n");
+            sys.stderr.write("\nThe line ->"+str(len(linefd))+"<- does not have 2 columns\n");
             sys.exit(1);
-        bamfiles.append( fields[0] );
-        label.append(    fields[1] );#todo check if digit
+       
+        bamfile = os.path.abspath(fields[0]);
+
+        if(not os.path.exists(bamfile)):
+            sys.stderr.write("\nERROR: The BAM file "+bamfile+" does not exist, make sure you have the correct relative or absolute path\n");
+            sys.exit(1);
+        
+        bamfiles.append( bamfile   );
+        fracbam = fields[1];
+        try:
+            fracbam = float(fracbam)
+        except ValueError:
+            sys.stderr.write("\nThe line ->"+str(len(linefd))+"<- does not have 2 columns where the second column is a floating point\n");
+            sys.exit(1);
+
+        if(fracbam>1 or fracbam<0):
+            sys.stderr.write("\nThe second column should between 0 and 1\n");
+            sys.exit(1);
+            
         
     foffilesub=re.sub('/','_',foffile);
     foffilesub=re.sub("\ ",'_',foffilesub);
-    
+    foffilesub=re.sub("\.",'_',foffilesub);
     
     logfile = (resultso+foffilesub+"_train.log");
     print(logfile);
 
-    #stage 1: feature extraction
+
     #stage 2: training+writing model
     
     
     if(not os.path.exists(logfile)):#step 1
+        stage=1;
         #read file of file
         
         #insert size
 
 
         #CNV
-        fileHandleLC = open ( ""+tfm+"/listcommands_1.txt", 'w' ) ;
+        os.mkdir( ""+options.resultso+"/stage1/", 0755 );
+
+        fileHandleLC = open ( ""+options.resultso+"/listcommands_1.txt", 'w' ) ;
         for bami in range(0,len(bamfiles)):
-            fileHandleLC.write(pathofinsize+" "+bamfiles[bami]+" |sort -n |uniq -c |gzip > "+options.resultso+"/stage1/"+str(bami)+".isize.gz");
+            fileHandleLC.write(pathofinsize+" "+bamfiles[bami]+" |sort -n |uniq -c |gzip > "+options.resultso+"/stage1/"+str(bami)+".isize.gz\n");
         fileHandleLC.close();
         
         
         logfilefp = open(logfile, "w");
-        logfile.write("#-o:"+options.resultso+"\n");
-        logfile.write("#fof:"+foffile+"\n");
-        logfile.write("#stage1\n");
+        logfilefp.write("#-o:"+options.resultso+"\n");
+        logfilefp.write("#fof:"+foffile+"\n");
+        logfilefp.write("#stage1\n");
         
         print("Please run the commands manually either using:");
-        print("cat "+tfm+"/listcommands.txt | parallel -j "+str(options.threads));
+        print("  cat "+options.resultso+"/listcommands_1.txt | parallel -j "+str(options.threads));
         print("on the use a batch/queueing system to launch:");
-        print("cat "+tfm+"/listcommands.txt | sbatch ...");
+        print("  cat "+options.resultso+"/listcommands_1.txt | sbatch ...");
         print("");
         print("Once commands are done, rerun with:\n");
-        print("cinch.py   -o "+options.resultso+"  train "+foffile);
+        print("  cinch.py   -o "+options.resultso+"  train "+foffile);
         print("");
 
-        cmdtolaunch="cat "+tfm+"/listcommands.txt | parallel  -j "+str(options.threads);
+        cmdtolaunch="cat "+options.resultso+"/listcommands_1.txt | parallel  -j "+str(options.threads);
 
 
         
     else:
-        stage=1;
+        stage=2;
         logfilefp = open(logfile, "r");
 
         #for linelog in logfilefp:
@@ -324,7 +354,7 @@ if(args[0] == "train"):
                     
         if( stage == 2):
             #parse isize
-            for bami in range(0:len(bamfiles)):
+            for bami in range(0,len(bamfiles)):
                 fileisize = options.resultso+"/stage1/"+str(bami)+".isize.gz";
                 if(not os.path.exists(fileisize)):
                     sys.stderr.write("\nThe file "+fileisize+" does not exist, please run all commands.\n");

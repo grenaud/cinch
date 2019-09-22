@@ -11,6 +11,7 @@ import pathlib
 import sys
 import os, random
 import subprocess
+import gzip
 
 #!pip install -q tensorflow==2.0.0-beta1
 #import pandas as pd
@@ -291,7 +292,11 @@ if(args[0] == "train"):
 
 
         #CNV
-        os.mkdir( ""+options.resultso+"/stage1/", 0755 );
+        if not os.path.exists( ""+options.resultso+"/stage1/"):
+            os.mkdir( ""+options.resultso+"/stage1/", 0755 );
+        else:
+            sys.stderr.write("\nThe directory "+options.resultso+"/stage1/"+" already exists\n");            
+
 
         fileHandleLC = open ( ""+options.resultso+"/listcommands_1.txt", 'w' ) ;
         for bami in range(0,len(bamfiles)):
@@ -302,7 +307,7 @@ if(args[0] == "train"):
         logfilefp = open(logfile, "w");
         logfilefp.write("#-o:"+options.resultso+"\n");
         logfilefp.write("#fof:"+foffile+"\n");
-        logfilefp.write("#stage1\n");
+        logfilefp.write("#stage1:\n");
         
         print("Please run the commands manually either using:");
         print("  cat "+options.resultso+"/listcommands_1.txt | parallel -j "+str(options.threads));
@@ -323,6 +328,8 @@ if(args[0] == "train"):
 
         #for linelog in logfilefp:
         linelog = logfilefp.readline();
+        linelog = linelog.strip();
+
         if(linelog.startswith("#-o:")):
             options.resultso = linelog[len("#-o:"):len(linelog)];                
         else:
@@ -330,9 +337,11 @@ if(args[0] == "train"):
             sys.exit(1);
 
         linelog = logfilefp.readline();
+        linelog = linelog.strip();
+
         if(linelog.startswith("#fof:")):
             if(foffile != linelog[len("#fof:"):len(linelog)]):
-                sys.stderr.write("\nThe line "+linelog+" in "+logfile+" should have #fof with the same as the ones provided as arguments: something went wrong, please delete the log file.\n");
+                sys.stderr.write("\nThe line "+linelog+" in "+logfile+" should have #fof with the same as the ones provided as arguments: something went wrong, please delete the log file.\n#"+linelog[len("#fof:"):len(linelog)]+"#");
                 sys.exit(1);
                 
         else:
@@ -340,6 +349,8 @@ if(args[0] == "train"):
             sys.exit(1);
 
         linelog = logfilefp.readline();
+        linelog = linelog.strip();
+
         if(linelog.startswith("#stage1:")):
             stage=2;
         else:
@@ -360,10 +371,12 @@ if(args[0] == "train"):
                     sys.stderr.write("\nThe file "+fileisize+" does not exist, please run all commands.\n");
                     sys.exit(1);
                 else:
-                    fileisizefd = open(fileisize, "r");
+                    fileisizefd = gzip.open(fileisize, "r");
 
                     for lineisfd in fileisizefd:
-                        fields=lineisfd.split("\t");
+                        #add filters and store
+                        fields=lineisfd.split( );
+                        print(fields[0]);
                     #TODO, add ability to read gzipped
                     
             #if(linelog read 

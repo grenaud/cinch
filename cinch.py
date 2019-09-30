@@ -12,6 +12,12 @@ import sys
 import os, random
 import subprocess
 import gzip
+from tqdm import tqdm
+
+import numpy as np
+from sklearn.decomposition import NMF, non_negative_factorization
+from sklearn.preprocessing import normalize
+
 
 #!pip install -q tensorflow==2.0.0-beta1
 #import pandas as pd
@@ -20,6 +26,8 @@ import re
 #from tensorflow import keras
 #from tensorflow.keras import layers
 
+#def normalize_rows(x: numpy.ndarray):
+#    return x/numpy.linalg.norm(x, ord=2, axis=1, keepdims=True)
 
 def which(program):
     sys.stderr.write("Detecting program: "+str(program)+"\n");
@@ -114,7 +122,7 @@ def which(program):
     return out;
 
 
-mininsize=0;
+mininsize=1;
 maxinsize=700;
 
 
@@ -123,6 +131,13 @@ parser = OptionParser(
 "\n\n"+
 
 "\n"+
+" ------------------------------   \n"+
+    "       __          __       \n"+
+"      /  ` | |\ | /  ` |__| \n"+
+"      \__, | | \| \__, |  | \n"+
+"\n"+
+" ------------------------------   \n"+
+"\n"
 "Prediction of ctDNA for low coverage data\n"+
 "\n"+
 
@@ -262,8 +277,6 @@ if(args[0] == "train"):
     #####################################
     #   stage 1: feature extraction     #
     #####################################
-
-
     foffilefd = open(foffile, "r");
     bamfiles  = [];
     label     = [];
@@ -326,6 +339,11 @@ if(args[0] == "train"):
         #read file of file
         
         #insert size
+        sys.stderr.write("\n");
+        sys.stderr.write("    #####################################    \n");
+        sys.stderr.write("    #   stage 1: feature extraction     #    \n");
+        sys.stderr.write("    #####################################    \n");
+        sys.stderr.write("\n");
 
 
         #CNV
@@ -340,9 +358,10 @@ if(args[0] == "train"):
         for bami in range(0,len(bamfiles)):
             fileHandleLC.write(pathofinsize+" "+bamfiles[bami]+" |sort -n |uniq -c |gzip > "+options.resultso+"/stage1/"+str(bami)+".isize.gz\n");
 
-        #readcount
-        for bami in range(0,len(bamfiles)):
-            fileHandleLC.write(pathofreadcounter+" -w "+str(options.winsize)+" -c "+str( ",".join(chrarray) )+" "+bamfiles[bami]+"  > "+options.resultso+"/stage1/"+str(bami)+".seg\n");
+        #readcount, todo reenable?
+        if False:
+            for bami in range(0,len(bamfiles)):
+                fileHandleLC.write(pathofreadcounter+" -w "+str(options.winsize)+" -c "+str( ",".join(chrarray) )+" "+bamfiles[bami]+"  > "+options.resultso+"/stage1/"+str(bami)+".seg\n");
         fileHandleLC.close();
         
         
@@ -367,12 +386,19 @@ if(args[0] == "train"):
         
     else:
         stage=2;
+        sys.stderr.write("\n");
+        sys.stderr.write("    #####################################    \n");
+        sys.stderr.write("    #   stage 2: parsing features       #    \n");
+        sys.stderr.write("    #####################################    \n");
+        sys.stderr.write("\n");
+        sys.stderr.write("Opening logfile:"+logfile+"\n");
+
         logfilefp = open(logfile, "r");
 
         #for linelog in logfilefp:
         linelog = logfilefp.readline();
         linelog = linelog.strip();
-
+        
         if(linelog.startswith("#-o:")):
             options.resultso = linelog[len("#-o:"):len(linelog)];                
         else:
@@ -418,9 +444,17 @@ if(args[0] == "train"):
             for i in range(mininsize,(maxinsize+1)):
                 isizedatfp.write( "\t"+str( i  ) );
             isizedatfp.write( "\n" );
+            sys.stderr.write("Reading bam files\n");
 
-            for bami in range(0,len(bamfiles)):
+
+            #dataAllisize = np.array([])
+            dataAllisize = [];
+
+            for bami in tqdm(range(0,len(bamfiles))):
                 fileisize = options.resultso+"/stage1/"+str(bami)+".isize.gz";
+                #datatoadd = np.array([]);
+                datatoadd = [];
+
                 if(not os.path.exists(fileisize)):
                     sys.stderr.write("\nThe file "+fileisize+" does not exist, please run all commands.\n");
                     sys.exit(1);
@@ -455,10 +489,60 @@ if(args[0] == "train"):
                     isizedatfp.write(str(bami));
                     for i in range(mininsize,(maxinsize+1)):
                         isizedatfp.write( "\t"+str( isizeCount[ i ]) );
-                    isizedatfp.write( "\n" );
+                        datatoadd.append( isizeCount[ i ]  );
 
+                    #print("datatoadd");
+                    #print(type(datatoadd));
+                    #print(datatoadd);
+
+                    #print("dataAllisize");
+                    #print( type( dataAllisize) );
+
+                    #print(dataAllisize.shape);
+                    #print(datatoadd.shape);
+                    isizedatfp.write( "\n" );
+                    #normalize
+                    #if( bami == 0 ):
+                    #    dataAllisize =   [datatoadd];
+                    #else:
+                    #dataAllisize = np.append( dataAllisize,  np.array(datatoadd)  , axis=0 );
+                    dataAllisize.append( datatoadd );
+                    
             isizedatfp.close();
             sys.stderr.write("\nWriten isize data to "+str(resultso+foffilesub+"_isize.dat")+".\n");
+
+            #########################
+            #      run HMMcopy      #
+            #########################
+            #normalize
+            print("dataAllisize");
+            #print(dataAllisize.shape);
+            #print(dataAllisize);
+
+            #row_sums          = dataAllisize.sum(axis=1);          
+            #dataAllisizeNorm  = dataAllisize / row_sums[:, numpy.newaxis]
+            
+            dataAllisizeNorm = np.array(normalize(dataAllisize,norm='l1'));
+            print(dataAllisize[0]);
+            print(dataAllisizeNorm[0]);
+
+            nmf = NMF(n_components=2, init='random', random_state=0)
+            
+
+            W = nmf.fit_transform(dataAllisizeNorm);
+            H = nmf.components_;
+
+
+            print("W");
+            print(W);
+
+            WNorm = np.array(normalize(W,norm='l1'));
+            print(WNorm);
+
+
+
+
+
 
             #########################
             #      run HMMcopy      #

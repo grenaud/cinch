@@ -681,13 +681,60 @@ if(args[0] == "predict"):
             Hmat.append( Hmattoadd );
 
         Hnp = np.array( Hmat );
-        print(Hnp.shape);
-        print(dataAllisizeNorm.shape);
+        #print(Hnp.shape);
+        #print(dataAllisizeNorm.shape);
+        aadsasd=1;
 
-        W, H, n_iter = non_negative_factorization(dataAllisizeNorm, n_components=wcomponents,W=None, H=Hnp,init='custom', random_state=0,solver="mu",beta_loss=1,max_iter=200)
-        print(W);
-    print(hmatrix);
-    print(foffile);
+        W, H, n_iter = non_negative_factorization(dataAllisizeNorm, 
+                                                  n_components=wcomponents,
+                                                  #W=None, 
+                                                  H=Hnp,
+                                                  update_H=False,
+                                                  init='custom', 
+                                                  random_state=0,
+                                                  solver="mu",
+                                                  beta_loss=1,
+                                                  max_iter=200);
+        #writing out W
+        wfile = (options.resultso+foffilesub+"_"+str(wcomponents)+"_W.out");
+        sys.stderr.write("\nWriten W matrix to "+wfile+"\n");
+
+        wfilefp = open(wfile, "w");
+
+        rows = W.shape[0]
+        cols = W.shape[1]
+        for i in range(0, rows):
+            wfilefp.write( str(W[i,0]) );
+            for j in range(1, cols):
+                wfilefp.write( "\t"+str(W[i,j]) );
+            wfilefp.write( "\n" );
+        wfilefp.close();
+
+        Wnorm = np.array(normalize(W,norm='l1'));
+
+        #writing out W norm
+        wfile = (options.resultso+foffilesub+"_"+str(wcomponents)+"_Wnorm.out");
+        sys.stderr.write("\nWriten normalized W matrix to "+wfile+"\n");
+
+        wfilefp = open(wfile, "w");
+
+        rows = Wnorm.shape[0]
+        cols = Wnorm.shape[1]
+        for i in range(0, rows):
+            wfilefp.write( str(Wnorm[i,0]) );
+            for j in range(1, cols):
+                wfilefp.write( "\t"+str(Wnorm[i,j]) );
+            wfilefp.write( "\n" );
+        wfilefp.close();
+
+
+
+    #end else not stage 1
+    
+        
+        #print(W);
+    #print(hmatrix);
+    #print(foffile);
 
     sys.exit(0);
 

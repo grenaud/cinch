@@ -17,6 +17,7 @@ from tqdm import tqdm
 import numpy as np
 from sklearn.decomposition import NMF, non_negative_factorization
 from sklearn.preprocessing import normalize
+from itertools             import combinations 
 
 
 #!pip install -q tensorflow==2.0.0-beta1
@@ -199,7 +200,7 @@ parser.add_option("-t"  , "--threads",      dest="threads",      help="Number of
 #
 ##parser.add_option(""  , "--branchl",     dest="branchlscale", help="Seq-gen branch scale, default is 0.00045",            default=0.00045, type="float");
 ##parser.add_option(""  , "--chrlen",      dest="lengthchr",    help="Chromosome length, default is 10kb",              default=10000,   type="int");
-##parser.add_option("-c", "--numcont",     dest="numcont",      help="Number of present-day human contaminants, default is 2", default=2, type="int")
+parser.add_option("-c",                     dest="numcomp",      help="Number of components, default is 2", default=2, type="int")
 parser.add_option("--winsize",              dest="winsize",      help="Size of genomic windows, default is 1Mbp",             default=1000000, type="int");
 parser.add_option(""  , "--chrnum",         dest="numchr",       help="Number of chromosomes",              default=22,   type="int");
 parser.add_option(""  , "--chrprefix",      dest="prechr",       help="Prefix for chromosomes",             default="chr",   type="string");
@@ -243,27 +244,38 @@ if(not os.path.exists(pathofreadcounter)):
     sys.stderr.write("\nERROR: The executable file "+pathofreadcounter+" does not exist, please type make in the main directory\n");
     sys.exit(1);
 
-rcmd        = re.sub('\s+','',which("R"));
 
-print(rcmd);
+    
 
-rscmd        = re.sub('\s+','',which("Rscript"));
+if(options.numcomp<=1):
+    sys.stderr.write("\nERROR: The number of components  "+str(options.numcomp)+" cannot be less than 1\n");
+    sys.exit(1);
 
-print(rscmd);
+if(options.numcomp>=9):
+    sys.stderr.write("\nERROR: The number of components  "+str(options.numcomp)+" cannot greater or equal to 9\n");
+    sys.exit(1);
+
+wcomponents = options.numcomp;
+
+#rcmd        = re.sub('\s+','',which("R"));
+#print(rcmd);
+
+#rscmd        = re.sub('\s+','',which("Rscript"));
+#print(rscmd);
 #hmmcopycmd =  rcmd+"  CMD BATCH --vanilla --silent <(echo \"is.installed <- function(mypkg) is.element(mypkg, installed.packages()[,1]);  is.installed('HMMcopy');\") /dev/stdout";
-hmmcopycmd =  rscmd+" -e \"is.installed <- function(mypkg) is.element(mypkg, installed.packages()[,1]);  is.installed('HMMcopy');\" ";
+#hmmcopycmd =  rscmd+" -e \"is.installed <- function(mypkg) is.element(mypkg, installed.packages()[,1]);  is.installed('HMMcopy');\" ";
 
-print(hmmcopycmd);
-outputrcmd = handle_job(hmmcopycmd);
+#print(hmmcopycmd);
+#outputrcmd = handle_job(hmmcopycmd);
 
-if( "[1] FALSE"  in outputrcmd ):
-    sys.stderr.write("\nERROR: cannot find package HMMcopy, please install it (see http://bioconductor.org/packages/release/bioc/html/HMMcopy.html)\n");
-    sys.exit(1);
+#if( "[1] FALSE"  in outputrcmd ):
+#    sys.stderr.write("\nERROR: cannot find package HMMcopy, please install it (see http://bioconductor.org/packages/release/bioc/html/HMMcopy.html)\n");
+#    sys.exit(1);
 
 
-if ( not (  "[1] TRUE"  in outputrcmd )):
-    sys.stderr.write("\nERROR: not sure if we can find package HMMcopy, contact developers, this is an unknown case\n");
-    sys.exit(1);
+#if ( not (  "[1] TRUE"  in outputrcmd )):
+#    sys.stderr.write("\nERROR: not sure if we can find package HMMcopy, contact developers, this is an unknown case\n");
+#    sys.exit(1);
 
 if( options.resultso == None):
     sys.stderr.write("\nPlease specify the outdir using -o outputDirectory/ or --outdir=outputDirectory/\n");
@@ -327,9 +339,9 @@ def readFOFlabeled(foffile):
             sys.exit(1);
 
         if(fracbam>1 or fracbam<0):
-            sys.stderr.write("\nThe second column should between 0 and 1\n");
+            sys.stderr.write("\nThe second column should between 0 and 1, found "+str(fracbam)+" on line "+str(linefd)+"\n");
             sys.exit(1);
-            
+        label.append( fracbam );
         
     foffilesub=re.sub('/','_',foffile);
     foffilesub=re.sub("\ ",'_',foffilesub);
@@ -411,7 +423,7 @@ def runStage1(resultso,threads,winsize,foffilesub,bamfiles,logfile):
     #sys.stderr.write("bamfiles"+str(bamfiles));
 
     for bami in range(0,len(bamfiles)):
-        fileHandleLC.write(pathofinsize+" "+bamfiles[bami]+" |sort -n |uniq -c |gzip > "+resultso+"/stage1/"+str(bami)+".isize.gz\n");
+        fileHandleLC.write(pathofinsize+" "+bamfiles[bami]+" |sort --temporary-directory="+resultso+"/stage1/ -n |uniq -c |gzip > "+resultso+"/stage1/"+str(bami)+".isize.gz\n");
 
     #readcount, todo reenable?
     if False:
@@ -595,8 +607,8 @@ if(args[0] == "train"):
             W, H, n_iter = non_negative_factorization(dataAllisizeNorm, n_components=wcomponents,init='random', random_state=0,solver="mu",beta_loss=1,max_iter=200)
             sys.stderr.write("done\n");
 
-            print("W");
-            print(W);
+            #print("W");
+            #print(W);
             
             hfile = (resultso+foffilesub+"_"+str(wcomponents)+"_H.dat");
             hfilefp = open(hfile, "w");
@@ -611,13 +623,98 @@ if(args[0] == "train"):
             hfilefp.close();
 
 
+            sys.stderr.write("Writen H matrix  "+hfile+"\n");
+
             WNorm = np.array(normalize(W,norm='l1'));
-            print(WNorm);
+            #print(WNorm);
 
-            sys.stderr.write("\nWriten H matrix  "+hfile+".\n");
+
+            wfile = (resultso+foffilesub+"_"+str(wcomponents)+"_W.dat");
+            wfilefp = open(wfile, "w");
             
+            rows = W.shape[0]
+            cols = W.shape[1]
+            for i in range(0, rows):
+                wfilefp.write( str(W[i,0]) );
+                for j in range(1, cols):
+                    wfilefp.write( "\t"+str(W[i,j]) );
+                wfilefp.write( "\n" );
+            wfilefp.close();
+
+            sys.stderr.write("Writen raw W matrix  "+wfile+"\n");
+
+            wfile = (resultso+foffilesub+"_"+str(wcomponents)+"_Wnorm.dat");
+            wfilefp = open(wfile, "w");
+            
+            rows = WNorm.shape[0]
+            cols = WNorm.shape[1]
+            for i in range(0, rows):
+                wfilefp.write( str(WNorm[i,0]) );
+                for j in range(1, cols):
+                    wfilefp.write( "\t"+str(WNorm[i,j]) );
+                wfilefp.write( "\n" );
+            wfilefp.close();
+
+            sys.stderr.write("Writen normalized W matrix  "+wfile+"\n");
 
 
+
+            #check correlations
+            
+            # Get all combination of [1, 2, 3] 
+            arraycomb=[]
+            for j in range(1,wcomponents):
+                comb = combinations(range(0,wcomponents),j) 
+                # Print the obtained combutations 
+                for i in list(comb): 
+                    arraycomb.append(i);
+
+            #print(arraycomb);
+            correlationArray=[];
+            correlationTOP= float("-inf");
+            correlationTOPi= -1;
+            
+            #for i in arraycomb: #for each possible combination
+            for i in range(0,len(arraycomb)): #for each possible combination
+                #print("i="+str(i))
+                #add components
+                #arraySumW=np.zeros(rows) 
+
+                arraySumW=[];
+                #sum the components 
+                for j in range(0,rows):
+                    #print("j="+str(j)+" "+str(WNorm[j]));
+                    #print("j="+str(j)+" "+str(WNorm[j,i]));
+                    arraySumW.append( sum( WNorm[ j , arraycomb[i] ] ) );
+                    
+                #print("i="+str(i))
+                #print(bamfiles);
+                #print(arraySumW)
+                #print(label);
+                #correlation
+                corr=np.corrcoef(arraySumW, label);
+                #print(corr[1][0]);
+                corrFactor=corr[1][0];
+                correlationArray.append(corrFactor);
+                if(corrFactor>correlationTOP):
+                    correlationTOP=corrFactor;
+                    correlationTOPi= i;
+
+            sys.stderr.write("Correlation factors:\n");
+            sys.stderr.write("components\tcorrelation\n");
+            wfilec = (resultso+foffilesub+"_"+str(wcomponents)+"_Wcomp.dat");
+
+            for i in range(0,len(arraycomb)): #for each possible combination
+                if(correlationTOPi == i):
+                    wfilecfp = open(wfilec, "w");
+                    wfilecfp.write( str(arraycomb[i]) );
+                    wfilecfp.close();
+
+                    sys.stderr.write(str(arraycomb[i])+"\t"+str(correlationArray[i])+"\tbest\n");
+                else:
+                    sys.stderr.write(str(arraycomb[i])+"\t"+str(correlationArray[i])+"\n");
+                    
+            sys.stderr.write("Writen best components  "+wfilec+"\n");
 
             #########################
             #      run HMMcopy      #
@@ -695,7 +792,7 @@ if(args[0] == "predict"):
                                                   solver="mu",
                                                   beta_loss=1,
                                                   max_iter=200);
-        #writing out W
+        #writing out W    
         wfile = (options.resultso+foffilesub+"_"+str(wcomponents)+"_W.out");
         sys.stderr.write("\nWriten W matrix to "+wfile+"\n");
 

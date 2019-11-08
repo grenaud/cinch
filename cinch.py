@@ -166,7 +166,7 @@ parser = OptionParser(
 "\n"+
 "\n"+
 
-"\tThe [model] is created by the training and has the following shape\n"+
+"\tThe [model] is the *H.dat file created by the training and has the following shape\n"+
     "\t\tcomp1_1 comp1_2 comp1_3 ... \n"+
     "\t\tcomp2_1 comp2_2 comp2_3 ...\n"+
     "\t\t..."+
@@ -188,8 +188,8 @@ parser.add_option("-o","--outdir",         dest="resultso",     help="Output dir
 #parser.add_option("--samtools",             dest="samtools",     help="Use this version of samtools",                        default="samtools",    type="string");
 #parser.add_option("--tabix",                dest="tabix",        help="Use this version of tabix",                           default="tabix",    type="string");
 #
-parser.add_option("--map",                  dest="mappability",  help="Path to the mappability file for the reference genome",   default=None,    type="string");
-parser.add_option("--gc",                   dest="gc",           help="Path to the GC content file  for the reference genome",   default=None,    type="string");
+#parser.add_option("--map",                  dest="mappability",  help="Path to the mappability file for the reference genome",   default=None,    type="string");
+#parser.add_option("--gc",                   dest="gc",           help="Path to the GC content file  for the reference genome",   default=None,    type="string");
 #
 #parser.add_option("--hpc",                  dest="hpc",          help="Use high-performance computing (for queueing systems ex: SGE)",          action="store_true");
 #parser.add_option("--resume",               dest="resume",       help="Resume by providing the temp directory used",                              type="string");
@@ -747,7 +747,8 @@ if(args[0] == "predict"):
     
 
     logfile = (resultso+foffilesub+"_predict.log");
-    print(logfile);
+    #sys.stderr.write("Trying to detect "+str(logfile)+"\n");
+
 
 
     #stage 2: training+writing model
@@ -760,11 +761,23 @@ if(args[0] == "predict"):
         #insert size
         runStage1(options.resultso,options.threads,options.winsize,foffilesub,bamfiles,logfile);
     else:
-        dataAllisize = parseIsize(options.resultso,foffilesub,bamfiles);
-        print(dataAllisize);
-        dataAllisizeNorm = np.array(normalize(dataAllisize,norm='l1'));
 
         hfile = hmatrix;
+        if(not hfile.endswith("_H.dat")):
+            sys.stderr.write("\nThe hfile "+str(hfile)+" should end with _H.dat\n");
+            sys.exit(1);
+
+        #detecting # of components
+
+        fieldshf=hfile.split("_");
+        try:
+            wcomponents=int(fieldshf[len(fieldshf)-2] )
+        except ValueError:
+            sys.stderr.write("\nTried to infer the # of components used during training using "+str(hfile)+", failed. Make sure the file name ends with #_H.dat where # is the number of components\n");
+            sys.exit(1);s
+
+        sys.stderr.write("Model used "+str(wcomponents)+" components\n");
+        sys.stderr.write("Opening model file "+str(hfile)+"\n");
         hfilefp = open(hfile, "r");
         Hmat=[];
         for hline in hfilefp:
@@ -778,9 +791,36 @@ if(args[0] == "predict"):
             Hmat.append( Hmattoadd );
 
         Hnp = np.array( Hmat );
+
+        #reading correlation
+        correlationTOP= -1;
+
+        
+        wcompfile   = hmatrix[0:-5]+"Wcomp.dat";
+        sys.stderr.write("Opening component file "+str(wcompfile)+"\n");
+        
+        wcompfilefp = open(wcompfile, "r");
+        for wcompline in wcompfilefp:
+            correlationTOP=wcompline;
+        correlationTOP=correlationTOP.replace("(","") 
+        correlationTOP=correlationTOP.replace(")","") 
+        correlationTOP=correlationTOP.replace(" ","") 
+
+
+
+        correlationTOP=np.fromstring(correlationTOP,dtype=int, sep=',');
+        sys.stderr.write("Using best W components: "+str(correlationTOP)+"\n");
+        
+
+        #sys.exit(1);
+
+        dataAllisize = parseIsize(options.resultso,foffilesub,bamfiles);
+        #print(dataAllisize);
+        dataAllisizeNorm = np.array(normalize(dataAllisize,norm='l1'));
+
         #print(Hnp.shape);
         #print(dataAllisizeNorm.shape);
-        aadsasd=1;
+
 
         W, H, n_iter = non_negative_factorization(dataAllisizeNorm, 
                                                   n_components=wcomponents,
@@ -821,6 +861,19 @@ if(args[0] == "predict"):
             wfilefp.write( str(Wnorm[i,0]) );
             for j in range(1, cols):
                 wfilefp.write( "\t"+str(Wnorm[i,j]) );
+            wfilefp.write( "\n" );
+        wfilefp.close();
+
+        #writing out subsampled W norm
+        wfile = (options.resultso+foffilesub+"_"+str(wcomponents)+"_Wnormcomp.out");
+        sys.stderr.write("\nWriten correlated score matrix to "+wfile+"\n");
+
+        wfilefp = open(wfile, "w");
+
+        rows = Wnorm.shape[0]
+        cols = Wnorm.shape[1]
+        for i in range(0, rows):
+            wfilefp.write( str(sum(Wnorm[i,correlationTOP])) );
             wfilefp.write( "\n" );
         wfilefp.close();
 

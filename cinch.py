@@ -17,6 +17,9 @@ from tqdm import tqdm
 import numpy as np
 from sklearn.decomposition import NMF, non_negative_factorization
 from sklearn.preprocessing import normalize
+from sklearn import metrics
+from sklearn.metrics import roc_auc_score
+
 from itertools             import combinations 
 
 
@@ -29,6 +32,7 @@ import re
 
 #def normalize_rows(x: numpy.ndarray):
 #    return x/numpy.linalg.norm(x, ord=2, axis=1, keepdims=True)
+
 
 def which(program):
     sys.stderr.write("Detecting program: "+str(program)+"\n");
@@ -58,6 +62,8 @@ def which(program):
             
 
     
+
+
 
     return out;
 
@@ -89,36 +95,6 @@ def handle_job(cjob):
 
 #sys.exit(1);
 
-
-
-def which(program):
-    sys.stderr.write("Detecting program: "+str(program)+"\n");
-    cjob = "type "+str(program);
-
-    sp = subprocess.Popen(["/bin/bash", "-i", "-c", cjob],
-                                stdout=subprocess.PIPE, 
-                                stderr=subprocess.PIPE)
-    
-
-    out, err = sp.communicate();
-    errcode  = sp.returncode;
-    if(errcode != 0): #has finished but wrong code
-        sys.stderr.write("Cannot find program: "+str(program)+" please make sure it is installed\n");
-        sys.exit(1);
-    
-        #print("#"+str(str(out).find("aliased"))+"#");
-        #out=str(out);
-    if(out.find("aliased") != -1): #was aliased
-        return out[out.find(" to ")+5:-2];
-    else:
-        if(out.find(" is ") != -1):
-            return out[out.find(" is ")+4:];
-        else:
-            sys.stderr.write("Cannot seem to find program: "+str(program)+" please make sure it is installed\n");
-            sys.exit(1);
-            
-
-    
 
     return out;
 
@@ -198,14 +174,15 @@ parser.add_option("-t"  , "--threads",      dest="threads",      help="Number of
 #
 #parser.add_option("--mismap",               dest="mismappingrate", help="Mismapping rate , default is "+str(mismappingrate)+"",            default=mismappingrate, type="float");
 #
-##parser.add_option(""  , "--branchl",     dest="branchlscale", help="Seq-gen branch scale, default is 0.00045",            default=0.00045, type="float");
-##parser.add_option(""  , "--chrlen",      dest="lengthchr",    help="Chromosome length, default is 10kb",              default=10000,   type="int");
-parser.add_option("-c",                     dest="numcomp",      help="Number of components, default is 2", default=2, type="int")
-parser.add_option("--winsize",              dest="winsize",      help="Size of genomic windows, default is 1Mbp",             default=1000000, type="int");
-parser.add_option(""  , "--chrnum",         dest="numchr",       help="Number of chromosomes",              default=22,   type="int");
-parser.add_option(""  , "--chrprefix",      dest="prechr",       help="Prefix for chromosomes",             default="chr",   type="string");
+##parser.add_option(""  , "--branchl",      dest="branchlscale", help="Seq-gen branch scale, default is 0.00045",            default=0.00045, type="float");
+##parser.add_option(""  , "--chrlen",       dest="lengthchr",    help="Chromosome length, default is 10kb",              default=10000,   type="int");
+parser.add_option("--minl",                 dest="minl",         help="Minimum fragment length to use, default is "+str(mininsize),                       default=mininsize,type="int")
+parser.add_option("-c",                     dest="numcomp",      help="Number of components, default is 2",                   default=2,        type="int")
+parser.add_option("--winsize",              dest="winsize",      help="Size of genomic windows, default is 1Mbp",             default=1000000,  type="int");
+parser.add_option(""  , "--chrnum",         dest="numchr",       help="Number of chromosomes",                                default=22,       type="int");
+parser.add_option(""  , "--chrprefix",      dest="prechr",       help="Prefix for chromosomes",                               default="chr",    type="string");
 
-#parser.add_option("--gc",                   dest="gcfile",       help="File containing the % of GC per window size (see above) default: "+gcContent+"",                  default=gcContent,    type="string");
+#parser.add_option("--gc",                  dest="gcfile",       help="File containing the % of GC per window size (see above) default: "+gcContent+"",                  default=gcContent,    type="string");
 #
 #parser.add_option("-c", "--conf",           dest="configfile",   help="Configuration for various conditions file to use for species/build default: "+str(pathofconfig)+"", default=pathofconfig, type="string");
 
@@ -238,14 +215,19 @@ if(not os.path.exists(pathofinsize)):
     sys.stderr.write("\nERROR: The executable file "+pathofinsize+" does not exist, please type make in the main directory\n");
     sys.exit(1);
 
-pathofreadcounter =  ("/".join(pathofexecarray))+"/lib/hmmcopy_utils/bin/readCounter";
+#pathofreadcounter =  ("/".join(pathofexecarray))+"/lib/hmmcopy_utils/bin/readCounter";
 
-if(not os.path.exists(pathofreadcounter)):
-    sys.stderr.write("\nERROR: The executable file "+pathofreadcounter+" does not exist, please type make in the main directory\n");
-    sys.exit(1);
+#if(not os.path.exists(pathofreadcounter)):
+#    sys.stderr.write("\nERROR: The executable file "+pathofreadcounter+" does not exist, please type make in the main directory\n");
+#    sys.exit(1);
 
 
     
+if(options.minl<1 or options.minl>=200 ):
+    sys.stderr.write("\nERROR: The minimum length of the fragments:"+str(options.minl)+" cannot be less than 1 or more than 200\n");
+    sys.exit(1);
+
+mininsize = options.minl;
 
 if(options.numcomp<=1):
     sys.stderr.write("\nERROR: The number of components  "+str(options.numcomp)+" cannot be less than 1\n");
@@ -412,6 +394,7 @@ def runStage1(resultso,threads,winsize,foffilesub,bamfiles,logfile):
     sys.stderr.write("\n");
 
     #CNV
+
     if not os.path.exists( ""+resultso+"/stage1/"):
         os.mkdir( ""+resultso+"/stage1/", 0755 );
     else:
@@ -423,13 +406,13 @@ def runStage1(resultso,threads,winsize,foffilesub,bamfiles,logfile):
     #sys.stderr.write("bamfiles"+str(bamfiles));
 
     for bami in range(0,len(bamfiles)):
-        fileHandleLC.write(pathofinsize+" "+bamfiles[bami]+" |sort --temporary-directory="+resultso+"/stage1/ -n |uniq -c |gzip > "+resultso+"/stage1/"+str(bami)+".isize.gz\n");
+        fileHandleLC.write(pathofinsize+"  "+bamfiles[bami]+" |sort --temporary-directory="+resultso+"/stage1/ -n |uniq -c |gzip > "+resultso+"/stage1/"+str(bami)+".isize.gz\n");
 
     #readcount, todo reenable?
-    if False:
-        for bami in range(0,len(bamfiles)):
-            fileHandleLC.write(pathofreadcounter+" -w "+str(winsize)+" -c "+str( ",".join(chrarray) )+" "+bamfiles[bami]+"  > "+resultso+"/stage1/"+str(bami)+".seg\n");
-    fileHandleLC.close();
+    #if False:
+    #    for bami in range(0,len(bamfiles)):
+    #        fileHandleLC.write(pathofreadcounter+" -w "+str(winsize)+" -c "+str( ",".join(chrarray) )+" "+bamfiles[bami]+"  > "+resultso+"/stage1/"+str(bami)+".seg\n");
+    #fileHandleLC.close();
 
     #logfile = (resultso+foffilesub+"_train.log");
     logfilefp = open(logfile, "w");
@@ -506,6 +489,7 @@ def parseIsize(resultso,foffilesub,bamfiles):
     sys.stderr.write("\nWriten isize data to "+str(resultso+foffilesub+"_isize.dat")+".\n");
     return dataAllisize;
 
+
 if(args[0] == "train"):
 
     #####################################
@@ -516,7 +500,7 @@ if(args[0] == "train"):
     
 
     logfile = (resultso+foffilesub+"_train.log");
-    print(logfile);
+    #print(logfile);
 
 
     #stage 2: training+writing model
@@ -525,7 +509,12 @@ if(args[0] == "train"):
     if(not os.path.exists(logfile)):#step 1
         stage=1;
         #read file of file
-        
+
+        if not os.path.exists( ""+resultso):
+            os.mkdir( ""+resultso, 0755 );
+        else:
+            sys.stderr.write("\nThe directory "+resultso+" already exists\n");            
+
         #insert size
         runStage1(options.resultso,options.threads,options.winsize,foffilesub,bamfiles,logfile);
 
@@ -604,7 +593,7 @@ if(args[0] == "train"):
             #W = nmf.fit_transform(dataAllisizeNorm);
             #H = nmf.components_;
             sys.stderr.write("\nRunning NMF...");
-            W, H, n_iter = non_negative_factorization(dataAllisizeNorm, n_components=wcomponents,init='random', random_state=0,solver="mu",beta_loss=1,max_iter=200)
+            W, H, n_iter = non_negative_factorization(dataAllisizeNorm, n_components=wcomponents,init='random', random_state=0,solver="mu",beta_loss=1,max_iter=1000)
             sys.stderr.write("done\n");
 
             #print("W");
@@ -675,6 +664,11 @@ if(args[0] == "train"):
             correlationTOPi= -1;
             
             #for i in arraycomb: #for each possible combination
+            auc=False;
+            if(len(np.unique(label))==2):
+                auc=True;
+                sys.stderr.write("Labels are binary, using AUC\n");
+
             for i in range(0,len(arraycomb)): #for each possible combination
                 #print("i="+str(i))
                 #add components
@@ -692,9 +686,15 @@ if(args[0] == "train"):
                 #print(arraySumW)
                 #print(label);
                 #correlation
-                corr=np.corrcoef(arraySumW, label);
-                #print(corr[1][0]);
-                corrFactor=corr[1][0];
+
+                if(auc):
+                    corr=roc_auc_score(label,arraySumW);                    
+                    corrFactor = corr;
+                else:                 
+                    corr=np.corrcoef(arraySumW, label);
+                    corrFactor=corr[1][0];
+  
+                    #print(corrFactor);
                 correlationArray.append(corrFactor);
                 if(corrFactor>correlationTOP):
                     correlationTOP=corrFactor;

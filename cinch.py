@@ -2,6 +2,7 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 from optparse import OptionParser
+from optparse import OptionGroup
 
 import pathlib
 
@@ -163,12 +164,14 @@ parser.add_option("-o","--outdir",         dest="resultso",     help="Output dir
 #
 #parser.add_option("--samtools",             dest="samtools",     help="Use this version of samtools",                        default="samtools",    type="string");
 #parser.add_option("--tabix",                dest="tabix",        help="Use this version of tabix",                           default="tabix",    type="string");
+parser.add_option("--bed",                   dest="bed",          help="Restrict the analysis to those regions (requires samtools and tabix to be installed)",               default=None,    type="string");
 #
 #parser.add_option("--map",                  dest="mappability",  help="Path to the mappability file for the reference genome",   default=None,    type="string");
 #parser.add_option("--gc",                   dest="gc",           help="Path to the GC content file  for the reference genome",   default=None,    type="string");
 #
 #parser.add_option("--hpc",                  dest="hpc",          help="Use high-performance computing (for queueing systems ex: SGE)",          action="store_true");
 #parser.add_option("--resume",               dest="resume",       help="Resume by providing the temp directory used",                              type="string");
+parser.add_option("--unmapped",              dest="unmapped",     help="Also consider the length of unmapped fragments",                         action="store_true");
 #parser.add_option("--nice",                 dest="nice",         help="Nice the jobs",                                                          action="store_true");
 parser.add_option("-t"  , "--threads",      dest="threads",      help="Number of threads to use if the local machine is used",  default=1,   type="int");
 #
@@ -178,9 +181,14 @@ parser.add_option("-t"  , "--threads",      dest="threads",      help="Number of
 ##parser.add_option(""  , "--chrlen",       dest="lengthchr",    help="Chromosome length, default is 10kb",              default=10000,   type="int");
 parser.add_option("--minl",                 dest="minl",         help="Minimum fragment length to use, default is "+str(mininsize),                       default=mininsize,type="int")
 parser.add_option("-c",                     dest="numcomp",      help="Number of components, default is 2",                   default=2,        type="int")
-parser.add_option("--winsize",              dest="winsize",      help="Size of genomic windows, default is 1Mbp",             default=1000000,  type="int");
 parser.add_option(""  , "--chrnum",         dest="numchr",       help="Number of chromosomes",                                default=22,       type="int");
 parser.add_option(""  , "--chrprefix",      dest="prechr",       help="Prefix for chromosomes",                               default="chr",    type="string");
+
+wingroup = OptionGroup(parser, "Window Based Options")
+wingroup.add_option("--winsize",              dest="winsize",      help="Size of genomic windows (ex: --winsize 1000000)",             type="int");
+wingroup.add_option("--fai",                  dest="fai",          help="Fasta index (fai) of the reference used for mapping if --winsize is specified)",             type="string");
+wingroup.add_option("--minobs",               dest="minobs",       help="Minimum number of observations for a given window",    default=10000,    type="int");
+parser.add_option_group(wingroup);
 
 #parser.add_option("--gc",                  dest="gcfile",       help="File containing the % of GC per window size (see above) default: "+gcContent+"",                  default=gcContent,    type="string");
 #
@@ -193,6 +201,8 @@ parser.add_option(""  , "--chrprefix",      dest="prechr",       help="Prefix fo
 
 (options,args) = parser.parse_args()
 
+usewindow=(options.winsize != None);
+
 if( len(args) < 2 ):
     sys.stderr.write("\nneed a least 2 arguments, please use -h to see options.\n");
     sys.exit(1);
@@ -202,7 +212,35 @@ chrarray=[];
 for chrn in range(1, options.numchr):
     chrarray.append( options.prechr+str(chrn));
 
+    
 sys.stderr.write("Using chromosomes: "+str( ",".join(chrarray) )+"\n" );
+chrnames   = {};
+chrranges  = [];
+
+if(usewindow):
+    if(options.fai == None):
+        sys.stderr.write("The option --fai is required for window based computation.\n");
+        sys.exit(1);
+
+        
+    referencefai = open(options.fai, "r");
+
+    for linefai in referencefai:
+        faia=linefai.split("\t");
+        if( not(faia[0] in chrarray ) ):
+            continue;
+
+        chrnames[ faia[0] ] = 0;
+        
+        #chrlengths.append( faia[1] );
+
+        for c in range(1, (int(faia[1])-options.winsize), options.winsize):
+            rangedict ={ "chr": faia[0], "start": c,   "end": c+(options.winsize-1) };        
+            chrranges.append(rangedict);
+    referencefai.close();
+
+
+#sys.exit(1);
 
 sys.stderr.write("Detecting program: insize");
 
@@ -275,6 +313,16 @@ if(not os.path.exists(foffile)):
 pathoffof      = os.path.abspath(foffile);
 pathoffofarray = pathoffof.split('/')[:-1];
 pathoffofnof   = "/".join(pathoffofarray);
+
+samtoolscmds="";
+if(options.bed or usewindow):
+    samtoolscmds        = re.sub('\s+','',which("samtools"));
+#print(rcmd);
+
+tabixcmds="";
+if(options.bed):
+    tabixcmds        = re.sub('\s+','',which("tabix"));
+#print(rcmd);
 
 
 # train
@@ -393,20 +441,89 @@ def runStage1(resultso,threads,winsize,foffilesub,bamfiles,logfile):
     sys.stderr.write("    #####################################    \n");
     sys.stderr.write("\n");
 
-    #CNV
+
 
     if not os.path.exists( ""+resultso+"/stage1/"):
         os.mkdir( ""+resultso+"/stage1/", 0755 );
     else:
         sys.stderr.write("\nThe directory "+resultso+"/stage1/"+" already exists\n");            
 
-    fileHandleLC = open ( ""+resultso+"/listcommands_1.txt", 'w' ) ;
+
     #isize
 
     #sys.stderr.write("bamfiles"+str(bamfiles));
 
-    for bami in range(0,len(bamfiles)):
-        fileHandleLC.write(pathofinsize+"  "+bamfiles[bami]+" |sort --temporary-directory="+resultso+"/stage1/ -n |uniq -c |gzip > "+resultso+"/stage1/"+str(bami)+".isize.gz\n");
+    if(winsize == None):#we do not use a window based analysis
+        fileHandleLC = open ( ""+resultso+"/listcommands_1.txt", 'w' ) ;
+
+        for bami in range(0,len(bamfiles)):
+            cmdtowrite="";
+
+            if(options.bed):
+                cmdtowrite=samtoolscmds+" view  -u -L <("+str(tabixcmds)+" "+str(options.bed)+" "+str(cn["chr"])+":"+str(cn["start"])+"-"+str(cn["end"])+" ) "+bamfiles[bami]+" ";
+            else:
+                cmdtowrite="cat "+bamfiles[bami]+" ";
+
+            cmdtowrite=cmdtowrite+" | "+pathofinsize+"  -l "+str(mininsize)+" -L "+str(maxinsize)+" ";
+
+            if(not(options.unmapped)): #
+                cmdtowrite=cmdtowrite+" -m ";
+
+            #else: (we consider unmapped too)
+            #do nothing, isize considers even unmapped fragments by default
+            
+            cmdtowrite=cmdtowrite+" /dev/stdin |sort --temporary-directory="+resultso+"/stage1/ -n |uniq -c |gzip > "+resultso+"/stage1/"+str(bami)+".isize.gz\n";
+            fileHandleLC.write(cmdtowrite);
+        fileHandleLC.close();
+
+
+
+    else:
+        sys.stderr.write("\nWriting temp files\n");            
+
+        filei=0;
+        for bami in range(0,len(bamfiles)):
+            if( os.path.exists(resultso+"/stage1/"+str(bami)+".isize") ):
+                os.remove(resultso+"/stage1/"+str(bami)+".isize") ;
+            if( os.path.exists(resultso+"/stage1/"+str(bami)+".isize.gz") ):
+                os.remove(resultso+"/stage1/"+str(bami)+".isize.gz") ;
+
+
+        #for bami in range(0,len(bamfiles)):
+        for bami in tqdm(range(0,len(bamfiles))):
+            fileHandleLC = open ( ""+resultso+"/listcommands_1_"+str(bami)+".txt", 'w' ) ;
+
+
+            for cn in chrranges:
+                cmdtowrite=samtoolscmds+" view  -u   "+bamfiles[bami]+" "+str(cn["chr"])+":"+str(cn["start"])+"-"+str(cn["end"])+" ";
+
+                if(options.bed):
+                    cmdtowrite=cmdtowrite+" | "+samtoolscmds+" view  -u -L <("+str(tabixcmds)+" "+str(options.bed)+" "+str(cn["chr"])+":"+str(cn["start"])+"-"+str(cn["end"])+" ) /dev/stdin ";
+                else:
+                    cmdtowrite=cmdtowrite+" ";
+
+                cmdtowrite=cmdtowrite+" | "+pathofinsize+" -v ";
+                cmdtowrite=cmdtowrite+"  -l "+str(mininsize)+" -L "+str(maxinsize)+" ";
+
+                if(not(options.unmapped)): #
+                    cmdtowrite=cmdtowrite+" -m ";
+                    #else: (we consider unmapped too)
+                    #do nothing, isize considers even unmapped fragments by default
+                    
+                cmdtowrite=cmdtowrite+" /dev/stdin  >> "+resultso+"/stage1/"+str(bami)+".isize\n";
+                fileHandleLC.write(cmdtowrite);
+                filei+=1;
+            cmdtowrite="gzip "+resultso+"/stage1/"+str(bami)+".isize\n";
+            fileHandleLC.close();
+
+            fileHandleSH = open ( ""+resultso+"/listcommands_1_"+str(bami)+".bash", 'w' ) ;
+            cmdtowrite="#!/bin/bash\n";
+            cmdtowrite=cmdtowrite+"\n";
+            cmdtowrite=cmdtowrite+"bash "+resultso+"/listcommands_1_"+str(bami)+".txt\n";
+            fileHandleSH.write(cmdtowrite);
+            fileHandleSH.close();
+
+            
 
     #readcount, todo reenable?
     #if False:
@@ -418,21 +535,33 @@ def runStage1(resultso,threads,winsize,foffilesub,bamfiles,logfile):
     logfilefp = open(logfile, "w");
     logfilefp.write("#-o:"+resultso+"\n");
     logfilefp.write("#fof:"+foffile+"\n");
-    logfilefp.write("#stage1:\n");
+    #logfilefp.write("#opt:"+foffile+"\n");    
+    logfilefp.write("#stage1:\n"); #TODO add isize
+
+
     logfilefp.close();
 
     print("Please run the commands manually either using:");
-    print("  cat "+resultso+"/listcommands_1.txt | parallel -j "+str(threads));
-    print("on the use a batch/queueing system to launch:");
-    print("  cat "+resultso+"/listcommands_1.txt | sbatch ...");
-    print("");
+    if(winsize == None):#we do not use a window based analysis
+        print("  cat "+resultso+"/listcommands_1.txt | parallel -j "+str(threads));
+        print("on the use a batch/queueing system to launch:");
+        print("  cat "+resultso+"/listcommands_1.txt | sbatch ...");
+        print("");
+    else:
+        #todo, write a file will all of the bash listcommands and launch it.
+        #print("  cat "+resultso+"/listcommands_1_*.txt | parallel -j "+str(threads));
+        print("  cat "+resultso+"/listcommands_1_*.bash | parallel -j "+str(threads));
+        print("on the use a batch/queueing system to launch, ex:");
+        print("  for i in `ls "+resultso+"/listcommands_1_*.bash `; do echo $i;  sbatch --time=11:00:00 --mem=2G  --cpus-per-task=2 $i;  done ");
+        print("");
     print("Once commands are done, rerun with:\n");
-    print("  cinch.py   -o "+resultso+"  train "+foffile);
+    print( " ".join(sys.argv) );
+    #print("  cinch.py   -o "+resultso+"  train "+foffile);
     print("");
 
     cmdtolaunch="cat "+resultso+"/listcommands_1.txt | parallel  -j "+str(threads);
     
-def parseIsize(resultso,foffilesub,bamfiles):
+def parseIsize(resultso,foffilesub,bamfiles,mininsize,maxinsize):
     isizedat = (resultso+foffilesub+"_isize.dat");
     isizedatfp = open(isizedat, "w");
 
@@ -459,7 +588,7 @@ def parseIsize(resultso,foffilesub,bamfiles):
                 isizeCount.append(0);
             #print(fileisize);
             fileisizefd = gzip.open(fileisize, "r");
-
+            sumisize=0;
             for lineisfd in fileisizefd:
                 #add filters and store
                 fields=lineisfd.split( );
@@ -467,19 +596,21 @@ def parseIsize(resultso,foffilesub,bamfiles):
                 try:
                     count   = int(fields[0]);
                     isize   = int(fields[1]);
-
                 except ValueError:
                     continue;
 
                 if( (isize<mininsize) or (isize>maxinsize) ):
                     continue;
-
+                sumisize+=count;
                 isizeCount[ isize ] = count;
 
             isizedatfp.write(str(bami));
-            for i in range(mininsize,(maxinsize+1)):
+            for i in range(mininsize,(maxinsize+1)):                        
                 isizedatfp.write( "\t"+str( isizeCount[ i ]) );
-                datatoadd.append( isizeCount[ i ]  );
+
+            for i in range(mininsize,(maxinsize+1)):
+                isizeCount[k]=float(isizeCount[k])/float(sumisize); #normalize
+                datatoadd.append( isizeCount[ i ]  );    
 
             isizedatfp.write( "\n" );
 
@@ -487,7 +618,132 @@ def parseIsize(resultso,foffilesub,bamfiles):
 
     isizedatfp.close();
     sys.stderr.write("\nWriten isize data to "+str(resultso+foffilesub+"_isize.dat")+".\n");
+    handle_job("gzip "+resultso+foffilesub+"_isize.dat");    
     return dataAllisize;
+
+
+
+def parseIsizeWindow(resultso,foffilesub,bamfiles,numbwins,mininsize,maxinsize,minobs):
+
+    dataAllisize = [];    
+    originalIdx  = [];    
+
+    if(not os.path.exists((resultso+foffilesub+"_isize.dat.gz"))):
+        isizedat = (resultso+foffilesub+"_isize.dat");
+        isizedatfp = open(isizedat, "w");
+
+        isizedatfp.write("#fileidx\twindowID");
+        for i in range(mininsize,(maxinsize+1)):
+            isizedatfp.write( "\t"+str( i  ) );
+        isizedatfp.write( "\n" );
+        sys.stderr.write("Reading bam files\n");
+
+        #dataAllisize = np.array([])
+
+
+        for bami in tqdm(range(0,len(bamfiles))):
+            fileisize = resultso+"/stage1/"+str(bami)+".isize.gz";
+            #datatoadd = np.array([]);
+            #datatoadd = [];
+
+            if(not os.path.exists(fileisize)):
+                sys.stderr.write("\nThe file "+fileisize+" does not exist, please run all commands.\n");
+                sys.exit(1);
+            else:
+                isizeCount=[];
+                #for i in range(0,maxinsize+1):
+                #    isizeCount.append(0);
+                #print(fileisize);
+
+                fileisizefd = gzip.open(fileisize, "r");
+                numLines=0;
+                for lineisfd in fileisizefd:
+                    numLines+=1;
+                    isizeCountW=[];
+                    #add filters and store
+                    fields=lineisfd.split( );
+                    sumVal=0;
+                    if(len(fields) == 1 ):
+                        isizeCountW = [-1] * (maxinsize-mininsize-1);
+                    else:
+                        for f in fields:
+                            try:
+                                count   = int(f);
+                                sumVal+=count;
+                                isizeCountW.append(count);
+                            except ValueError:
+                                sys.stderr.write("cannot convert "+str(f)+" to int");
+                                sys.exit(1);
+                    #    continue;
+                    #if( (isize<mininsize) or (isize>maxinsize) ):
+                    #    continue;
+
+                    isizeCount.append( isizeCountW );
+                    #isizeCount[ isize ] = count;
+                    #for i in range( 0 , numbwins):
+                    isizedatfp.write(str(bami)+"\t"+str(len(isizeCount))+"\t");
+                    for i in range(0,len(isizeCountW)):
+                        isizedatfp.write( "\t"+str( isizeCountW[ i ]) );
+                        #datatoadd.append( isizeCountW[ i ]  );
+
+                    isizedatfp.write( "\n" );
+
+                fileisizefd.close();
+
+                if(numLines != numbwins):
+                    sys.stderr.write("Found  "+str(numLines)+" fields but no expected "+str(numbwins));
+                    sys.exit(1);
+
+                    #dataAllisize.append( isizeCountW );
+                if( (isizeCountW[0] != -1) and (sumVal>=minobs) ):
+                    for k in range(0,len(isizeCountW)):
+                        isizeCountW[k]=float(isizeCountW[k])/float(sumVal); #normalize
+                    dataAllisize.append( isizeCountW );
+                    originalIdx.append( lineCount );
+
+
+        isizedatfp.close();
+        sys.stderr.write("\nWriten isize data to "+str(resultso+foffilesub+"_isize.dat")+".\n");
+        handle_job("gzip "+resultso+foffilesub+"_isize.dat");    
+    else:
+        #
+        sys.stderr.write("\nFile "+resultso+foffilesub+"_isize.dat.gz exists, reading it\n");
+        #sys.exit(1);
+        fileisizefd = gzip.open(resultso+foffilesub+"_isize.dat.gz", "r");
+
+        lineCount=0;
+        #keep count of order in 
+        for lineisfd in fileisizefd:
+            
+            isizeCountW=[];
+            #print("#"+lineisfd+"!");
+            fields=lineisfd.split( );            
+            if(fields[0] == "#fileidx"):#skip header                
+                continue;
+            sumVal=0;
+            for f in fields[2:]:
+                try:
+                    count   = int(f);         
+                    sumVal+=count;
+                    isizeCountW.append(count);
+                except ValueError:
+                    sys.stderr.write("cannot convert "+str(f)+" to int");
+                    sys.exit(1);
+
+            if( (isizeCountW[0] != -1) and (sumVal>=minobs) ):
+                #print(sumVal);
+                #print(len(isizeCountW))
+                for k in range(0,len(isizeCountW)):
+                    isizeCountW[k]=float(isizeCountW[k])/float(sumVal); #normalize
+
+                dataAllisize.append( isizeCountW );
+                originalIdx.append( lineCount );
+
+            if((lineCount%10000)==0 and lineCount!=0):
+                print("read "+str(lineCount)+" lines");
+            lineCount+=1;
+        fileisizefd.close();
+    return dataAllisize,originalIdx;
 
 
 if(args[0] == "train"):
@@ -571,25 +827,48 @@ if(args[0] == "train"):
             #########################
             #      PARSE ISIZE      #
             #########################
-            dataAllisize = parseIsize(options.resultso,foffilesub,bamfiles);
+            if( usewindow ):
+                dataAllisize , originalIdx = parseIsizeWindow(options.resultso,foffilesub,bamfiles,len(chrranges),mininsize,maxinsize,options.minobs);
+            else:
+                dataAllisize               = parseIsize(      options.resultso,foffilesub,bamfiles,               mininsize,maxinsize);
             #########################
             #      run HMMcopy      #
             #########################
             #normalize
             #print("dataAllisize");
-            #print(dataAllisize.shape);
+            #print(len(dataAllisize));
             #print(dataAllisize);
-
+            
             #row_sums          = dataAllisize.sum(axis=1);          
             #dataAllisizeNorm  = dataAllisize / row_sums[:, numpy.newaxis]
+           # for d in range(0,len(dataAllisize)):
+                #print(str(d)+"\t"+str(type(dataAllisize[d])));
+            #    print(str(d)+"\t"+str(dataAllisize[d]));
+            #    for i in range(0,len(dataAllisize[d])):
+            #        print(str(i)+"\t"+str(type(dataAllisize[d][i])));
+                #print(dataAllisize[d]);
+                #print(len(dataAllisize[d]));
+                #print(type(dataAllisize[d]));
             
-            dataAllisizeNorm = np.array(normalize(dataAllisize,norm='l1'));
+            #print(type(dataAllisize[0][0]));
+            #print(type(dataAllisize));
+            #print(len(dataAllisize));
+            
+            #sys.exit(1);
+            
+            #
+            #dataAllisizeNorm = np.array(normalize(dataAllisize,norm='l1'));
+            dataAllisizeNorm = np.array( dataAllisize );
+            #dataAllisizeNP    = np.array(dataAllisize);
+            #print(dataAllisizeNP);
+            #print(dataAllisizeNP.shape);
+            #print(dataAllisizeNorm);
+            #sys.exit(1);
             #print(dataAllisize[0]);
             #print(dataAllisizeNorm[0]);
-
+            
             #nmf = NMF(n_components=2, init='random', random_state=0)
             
-
             #W = nmf.fit_transform(dataAllisizeNorm);
             #H = nmf.components_;
             sys.stderr.write("\nRunning NMF...");
@@ -646,75 +925,103 @@ if(args[0] == "train"):
 
             sys.stderr.write("Writen normalized W matrix  "+wfile+"\n");
 
+            #write W on a per window basis
+            if( usewindow ):
+                wfile = (resultso+foffilesub+"_"+str(wcomponents)+"_window.dat");
+                wfilefp = open(wfile, "w");
+                idxwin=0;
+                idxwinMat=0;
+                #originalIdx
+                for bami in range(0,len(bamfiles)):
+                    for cn in chrranges:
+                        strtowrite=str(idxwin)+"\t"+bamfiles[bami]+"\t"+str(cn["chr"])+":"+str(cn["start"])+"-"+str(cn["end"])+"\t";
+                        #originalIdx is the original index 
+                        #print(str(idxwin)+"\t"+str(idxwinMat)+"\t"+str(idxwinMat<len(originalIdx)))
+                        
+                        if(idxwinMat<len(originalIdx) and idxwin==originalIdx[idxwinMat] ):#match
+                            strtowrite+=str(WNorm[idxwinMat,0]);
+                            for j in range(1, cols):
+                                strtowrite+="\t"+str(WNorm[idxwinMat,j]) ;
+                            idxwinMat+=1;
+                        else:
+                            strtowrite+="NA";
+                            for j in range(1, cols):
+                                strtowrite+="\tNA";
+
+                        wfilefp.write( strtowrite+"\n" );
+                        idxwin+=1;
+
+                sys.stderr.write("Writen normalized W per window  "+wfile+"\n");
 
 
             #check correlations
             
             # Get all combination of [1, 2, 3] 
-            arraycomb=[]
-            for j in range(1,wcomponents):
-                comb = combinations(range(0,wcomponents),j) 
-                # Print the obtained combutations 
-                for i in list(comb): 
-                    arraycomb.append(i);
+            if( not usewindow ):
+                arraycomb=[]
+                for j in range(1,wcomponents):
+                    comb = combinations(range(0,wcomponents),j) 
+                    # Print the obtained combutations 
+                    for i in list(comb): 
+                        arraycomb.append(i);
 
-            #print(arraycomb);
-            correlationArray=[];
-            correlationTOP= float("-inf");
-            correlationTOPi= -1;
-            
-            #for i in arraycomb: #for each possible combination
-            auc=False;
-            if(len(np.unique(label))==2):
-                auc=True;
-                sys.stderr.write("Labels are binary, using AUC\n");
+                #print(arraycomb);
+                correlationArray=[];
+                correlationTOP= float("-inf");
+                correlationTOPi= -1;
 
-            for i in range(0,len(arraycomb)): #for each possible combination
-                #print("i="+str(i))
-                #add components
-                #arraySumW=np.zeros(rows) 
+                #for i in arraycomb: #for each possible combination
+                auc=False;
+                if(len(np.unique(label))==2):
+                    auc=True;
+                    sys.stderr.write("Labels are binary, using AUC\n");
 
-                arraySumW=[];
-                #sum the components 
-                for j in range(0,rows):
-                    #print("j="+str(j)+" "+str(WNorm[j]));
-                    #print("j="+str(j)+" "+str(WNorm[j,i]));
-                    arraySumW.append( sum( WNorm[ j , arraycomb[i] ] ) );
-                    
-                #print("i="+str(i))
-                #print(bamfiles);
-                #print(arraySumW)
-                #print(label);
-                #correlation
+                for i in range(0,len(arraycomb)): #for each possible combination
+                    #print("i="+str(i))
+                    #add components
+                    #arraySumW=np.zeros(rows) 
 
-                if(auc):
-                    corr=roc_auc_score(label,arraySumW);                    
-                    corrFactor = corr;
-                else:                 
-                    corr=np.corrcoef(arraySumW, label);
-                    corrFactor=corr[1][0];
-  
-                    #print(corrFactor);
-                correlationArray.append(corrFactor);
-                if(corrFactor>correlationTOP):
-                    correlationTOP=corrFactor;
-                    correlationTOPi= i;
+                    arraySumW=[];
+                    #sum the components 
+                    for j in range(0,rows):
+                        #print("j="+str(j)+" "+str(WNorm[j]));
+                        #print("j="+str(j)+" "+str(WNorm[j,i]));
+                        arraySumW.append( sum( WNorm[ j , arraycomb[i] ] ) );
 
-            sys.stderr.write("Correlation factors:\n");
-            sys.stderr.write("components\tcorrelation\n");
-            wfilec = (resultso+foffilesub+"_"+str(wcomponents)+"_Wcomp.dat");
+                    #print("i="+str(i))
+                    #print(bamfiles);
+                    #print(arraySumW)
+                    #print(label);
+                    #correlation
 
-            for i in range(0,len(arraycomb)): #for each possible combination
-                if(correlationTOPi == i):
-                    wfilecfp = open(wfilec, "w");
-                    wfilecfp.write( str(arraycomb[i]) );
-                    wfilecfp.close();
+                    if(auc):
+                        corr=roc_auc_score(label,arraySumW);                    
+                        corrFactor = corr;
+                    else:                 
+                        corr=np.corrcoef(arraySumW, label);
+                        corrFactor=corr[1][0];
 
-                    sys.stderr.write(str(arraycomb[i])+"\t"+str(correlationArray[i])+"\tbest\n");
-                else:
-                    sys.stderr.write(str(arraycomb[i])+"\t"+str(correlationArray[i])+"\n");
-                    
-            sys.stderr.write("Writen best components  "+wfilec+"\n");
+                        #print(corrFactor);
+                    correlationArray.append(corrFactor);
+                    if(corrFactor>correlationTOP):
+                        correlationTOP=corrFactor;
+                        correlationTOPi= i;
+
+                sys.stderr.write("Correlation factors:\n");
+                sys.stderr.write("components\tcorrelation\n");
+                wfilec = (resultso+foffilesub+"_"+str(wcomponents)+"_Wcomp.dat");
+
+                for i in range(0,len(arraycomb)): #for each possible combination
+                    if(correlationTOPi == i):
+                        wfilecfp = open(wfilec, "w");
+                        wfilecfp.write( str(arraycomb[i]) );
+                        wfilecfp.close();
+
+                        sys.stderr.write(str(arraycomb[i])+"\t"+str(correlationArray[i])+"\tbest\n");
+                    else:
+                        sys.stderr.write(str(arraycomb[i])+"\t"+str(correlationArray[i])+"\n");
+
+                sys.stderr.write("Writen best components  "+wfilec+"\n");
 
             #########################
             #      run HMMcopy      #
@@ -814,9 +1121,14 @@ if(args[0] == "predict"):
 
         #sys.exit(1);
 
-        dataAllisize = parseIsize(options.resultso,foffilesub,bamfiles);
+        if( usewindow ):
+            dataAllisize , originalIdx = parseIsizeWindow(options.resultso,foffilesub,bamfiles,len(chrranges),mininsize,maxinsize,options.minobs);
+        else:
+            dataAllisize = parseIsize(options.resultso,foffilesub,bamfiles,mininsize,maxinsize);
         #print(dataAllisize);
-        dataAllisizeNorm = np.array(normalize(dataAllisize,norm='l1'));
+        #we used to normalize, now normalize in reading
+        #dataAllisizeNorm = np.array(normalize(dataAllisize,norm='l1'));
+        dataAllisizeNorm = np.array(dataAllisize);
 
         #print(Hnp.shape);
         #print(dataAllisizeNorm.shape);

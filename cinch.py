@@ -209,7 +209,7 @@ if( len(args) < 2 ):
 
 
 chrarray=[];
-for chrn in range(1, options.numchr):
+for chrn in range(1, options.numchr+1):
     chrarray.append( options.prechr+str(chrn));
 
     
@@ -460,7 +460,7 @@ def runStage1(resultso,threads,winsize,foffilesub,bamfiles,logfile):
             cmdtowrite="";
 
             if(options.bed):
-                cmdtowrite=samtoolscmds+" view  -u -L <("+str(tabixcmds)+" "+str(options.bed)+" "+str(cn["chr"])+":"+str(cn["start"])+"-"+str(cn["end"])+" ) "+bamfiles[bami]+" ";
+                cmdtowrite=samtoolscmds+" view  -u -L  "+str(options.bed)+" "+bamfiles[bami]+" ";
             else:
                 cmdtowrite="cat "+bamfiles[bami]+" ";
 
@@ -609,7 +609,7 @@ def parseIsize(resultso,foffilesub,bamfiles,mininsize,maxinsize):
                 isizedatfp.write( "\t"+str( isizeCount[ i ]) );
 
             for i in range(mininsize,(maxinsize+1)):
-                isizeCount[k]=float(isizeCount[k])/float(sumisize); #normalize
+                isizeCount[i]=float(isizeCount[i])/float(sumisize); #normalize
                 datatoadd.append( isizeCount[ i ]  );    
 
             isizedatfp.write( "\n" );
@@ -647,7 +647,7 @@ def parseIsizeWindow(resultso,foffilesub,bamfiles,numbwins,mininsize,maxinsize,m
             #datatoadd = [];
 
             if(not os.path.exists(fileisize)):
-                sys.stderr.write("\nThe file "+fileisize+" does not exist, please run all commands.\n");
+                sys.stderr.write("\nThe file "+str(fileisize)+" does not exist, please run all commands.\n");
                 sys.exit(1);
             else:
                 isizeCount=[];
@@ -663,6 +663,10 @@ def parseIsizeWindow(resultso,foffilesub,bamfiles,numbwins,mininsize,maxinsize,m
                     #add filters and store
                     fields=lineisfd.split( );
                     sumVal=0;
+                    if(len(fields) != (maxinsize-mininsize-1) ):
+                        sys.stderr.write("A line in file: "+str(fileisize)+" contains "+str(len(fields))+" fields but we expect: "+str(maxinsize-mininsize-1)+", verify the arguments to the script\n");
+                        sys.exit(1);
+
                     if(len(fields) == 1 ):
                         isizeCountW = [-1] * (maxinsize-mininsize-1);
                     else:
